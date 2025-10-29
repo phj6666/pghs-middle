@@ -3,284 +3,143 @@
 <head>
   <meta charset="utf-8" />
   <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Teachable Machine → Game controller</title>
+  <title>Teachable Machine Game Controller</title>
   <style>
-    body{font-family:system-ui,Segoe UI,Roboto,Helvetica,Arial;margin:0;display:flex;gap:20px;padding:20px;background:#0b1220;color:#e6eef8}
-    .left-col{width:360px}
-    video{width:100%;border-radius:8px;background:#000}
-    .panel{background:#0f1724;padding:12px;border-radius:8px;box-shadow:0 6px 18px rgba(0,0,0,0.5)}
-    canvas{background:#10131a;border-radius:8px;display:block}
-    h1{margin:0 0 10px 0;font-size:18px}
-    p{margin:6px 0 0 0;font-size:13px;color:#9fb0d6}
-    .labels{margin-top:8px;display:flex;gap:8px;flex-wrap:wrap}
-    .label{background:#081025;padding:6px 8px;border-radius:6px;font-size:13px}
-    .controls{display:flex;gap:8px;margin-top:10px}
-    button{padding:8px 10px;border-radius:6px;border:1px solid rgba(255,255,255,0.06);background:transparent;color:inherit;cursor:pointer}
-    .footer{font-size:13px;margin-top:10px;color:#9fb0d6}
-    code{background:#071127;padding:2px 6px;border-radius:4px}
+    body {font-family: system-ui, sans-serif; background: #0a0f1a; color: #e6eef8; margin: 0; padding: 20px; display: flex; gap: 20px;}
+    video {width: 100%; max-width: 360px; background: #000; border-radius: 10px;}
+    canvas {background: #111a2b; border-radius: 10px; display: block; margin-top: 10px;}
+    button {margin: 5px; padding: 8px 12px; border: none; border-radius: 6px; background: #1f2a44; color: #fff; cursor: pointer;}
+    button:hover {background: #2b3a5c;}
+    .label {background: #16213a; margin: 4px; padding: 5px 8px; border-radius: 4px; display: inline-block;}
   </style>
 </head>
 <body>
-  <div class="left-col">
-    <div class="panel">
-      <h1>Teachable Machine</h1>
-      <p>Model: <code>mXVIPoHTE</code> (classes: <code>left</code>, <code>right</code>, <code>jump</code>, <code>none</code>)</p>
-      <video id="webcam" autoplay playsinline muted></video>
-      <div class="labels" id="labels"></div>
-      <div class="controls">
-        <button id="startBtn">Start webcam & model</button>
-        <button id="stopBtn" disabled>Stop</button>
-        <button id="calibrateBtn">Calibrate (baseline)</button>
-      </div>
-      <p class="footer">Tip: put a clear gesture in front of the camera and press Start. Use GitHub Pages to deploy this single HTML file.</p>
+  <div>
+    <h2>Teachable Machine Model</h2>
+    <p>Model URL: <code>mXVIPoHTE</code></p>
+    <video id="webcam" autoplay playsinline muted></video>
+    <div id="labels"></div>
+    <div>
+      <button id="startBtn">웹캠 시작</button>
+      <button id="stopBtn" disabled>중지</button>
     </div>
   </div>
-
   <div style="flex:1">
-    <div class="panel">
-      <h1>Game</h1>
-      <canvas id="game" width="800" height="400"></canvas>
-      <p class="footer">Character controlled by model outputs. Confidence threshold and smoothing built in.</p>
-    </div>
+    <h2>게임 화면</h2>
+    <canvas id="game" width="800" height="400"></canvas>
   </div>
 
-  <!-- Teachable Machine image library -->
   <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
   <script>
-    // --- Configuration ---
     const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/mXVIPoHTE/';
-    const CONFIDENCE_THRESHOLD = 0.60; // min confidence to accept prediction
-    const SMOOTHING_FRAMES = 5; // require majority over last N frames
-    const JUMP_COOLDOWN = 500; // ms between allowed jumps
-
-    // DOM
+    let model, webcamStream, running = false;
     const video = document.getElementById('webcam');
+    const labelsDiv = document.getElementById('labels');
     const startBtn = document.getElementById('startBtn');
     const stopBtn = document.getElementById('stopBtn');
-    const calibrateBtn = document.getElementById('calibrateBtn');
-    const labelsDiv = document.getElementById('labels');
     const canvas = document.getElementById('game');
     const ctx = canvas.getContext('2d');
 
-    // Teachable Machine
-    let model, maxPredictions;
-    let webcamStream = null;
-    let running = false;
-
-    // smoothing
-    const recent = [];
-
-    // game state
-    const player = {
-      x: 100, y: 300, w: 40, h: 60,
-      vx: 0, vy: 0,
-      speed: 3.2, jumpPower: -10,
-      onGround: false
-    };
+    const player = {x:100,y:300,w:40,h:60,vx:0,vy:0,speed:3.2,jumpPower:-10,onGround:false};
     const gravity = 0.6;
 
-    let lastJumpTime = 0;
-
-    // --- Load model ---
     async function loadModel() {
       model = await tmImage.load(MODEL_URL + 'model.json', MODEL_URL + 'metadata.json');
-      maxPredictions = model.getTotalClasses();
+      console.log('모델 불러오기 완료');
     }
 
-    // start webcam using browser API
     async function startWebcam() {
-      if (navigator.mediaDevices && navigator.mediaDevices.getUserMedia) {
-        webcamStream = await navigator.mediaDevices.getUserMedia({ video: { width: 640, height: 480, facingMode: 'user' }, audio: false });
-        video.srcObject = webcamStream;
+      try {
+        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
+        video.srcObject = stream;
+        webcamStream = stream;
         await video.play();
-      } else {
-        alert('웹캠을 사용할 수 없습니다. HTTPS 환경인지 확인하세요.');
+        console.log('웹캠 시작됨');
+      } catch (err) {
+        alert('웹캠 접근 오류: 브라우저 권한 또는 HTTPS 환경을 확인하세요.\n' + err.message);
+        console.error(err);
+        throw err;
       }
     }
 
-    // stop webcam
     function stopWebcam() {
       if (webcamStream) {
         webcamStream.getTracks().forEach(t => t.stop());
         webcamStream = null;
+        console.log('웹캠 중지됨');
       }
     }
 
-    // predict a single frame
-    async function predictFrame() {
-      if (!model || !running) return;
-      const prediction = await model.predict(video, false);
-      // sort predictions by probability desc
-      prediction.sort((a,b) => b.probability - a.probability);
-
-      // update labels UI
-      labelsDiv.innerHTML = '';
-      for (let i = 0; i < Math.min(prediction.length, 4); i++) {
-        const p = prediction[i];
-        const el = document.createElement('div');
-        el.className = 'label';
-        el.textContent = `${p.className}: ${Math.round(p.probability*100)}%`;
-        labelsDiv.appendChild(el);
-      }
-
-      // smoothing logic
+    async function predict() {
+      if (!running || !model) return;
+      const prediction = await model.predict(video);
+      prediction.sort((a,b)=>b.probability - a.probability);
       const top = prediction[0];
-      const topLabel = top.className;
-      const topProb = top.probability;
+      labelsDiv.innerHTML = prediction.map(p => `<div class='label'>${p.className}: ${(p.probability*100).toFixed(1)}%</div>`).join('');
 
-      if (topProb >= CONFIDENCE_THRESHOLD) {
-        recent.push(topLabel);
-        if (recent.length > SMOOTHING_FRAMES) recent.shift();
+      if (top.probability > 0.6) {
+        controlPlayer(top.className);
       } else {
-        recent.push('none');
-        if (recent.length > SMOOTHING_FRAMES) recent.shift();
+        controlPlayer('none');
       }
-
-      // majority vote
-      const counts = recent.reduce((acc, lab) => { acc[lab] = (acc[lab] || 0) + 1; return acc; }, {});
-      let chosen = 'none';
-      let best = 0;
-      for (const k in counts) if (counts[k] > best) { best = counts[k]; chosen = k; }
-
-      applyControl(chosen);
+      if (running) requestAnimationFrame(predict);
     }
 
-    function applyControl(label) {
-      // left, right, jump, none
-      if (label === 'left') {
-        player.vx = -player.speed;
-      } else if (label === 'right') {
-        player.vx = player.speed;
-      } else if (label === 'jump') {
-        const now = performance.now();
-        if (player.onGround && now - lastJumpTime > JUMP_COOLDOWN) {
-          player.vy = player.jumpPower;
-          player.onGround = false;
-          lastJumpTime = now;
-        }
-      } else { // none
-        player.vx = 0;
-      }
+    function controlPlayer(action) {
+      if (action === 'left') player.vx = -player.speed;
+      else if (action === 'right') player.vx = player.speed;
+      else if (action === 'jump' && player.onGround) { player.vy = player.jumpPower; player.onGround = false; }
+      else if (action === 'none') player.vx = 0;
     }
 
-    // --- Game loop ---
-    function update(dt) {
-      // physics
+    function updateGame() {
       player.vy += gravity;
       player.x += player.vx;
       player.y += player.vy;
-
-      // floor collision
-      const floorY = canvas.height - 40;
-      if (player.y + player.h > floorY) {
-        player.y = floorY - player.h;
+      if (player.y + player.h >= canvas.height - 40) {
+        player.y = canvas.height - 40 - player.h;
         player.vy = 0;
         player.onGround = true;
       }
-
-      // bounds
-      if (player.x < 0) player.x = 0;
-      if (player.x + player.w > canvas.width) player.x = canvas.width - player.w;
     }
 
-    function draw() {
-      // clear
+    function drawGame() {
       ctx.clearRect(0,0,canvas.width,canvas.height);
-
-      // background
-      ctx.fillStyle = '#071024';
+      ctx.fillStyle = '#09142c';
       ctx.fillRect(0,0,canvas.width,canvas.height);
-
-      // ground
-      ctx.fillStyle = '#123';
-      ctx.fillRect(0, canvas.height - 40, canvas.width, 40);
-
-      // player
+      ctx.fillStyle = '#203764';
+      ctx.fillRect(0,canvas.height-40,canvas.width,40);
       ctx.fillStyle = '#f5a623';
-      ctx.fillRect(player.x, player.y, player.w, player.h);
-
-      // simple shadow
-      ctx.globalAlpha = 0.18;
-      ctx.fillStyle = '#000';
-      ctx.fillRect(player.x+4, canvas.height - 36, player.w-8, 6);
-      ctx.globalAlpha = 1.0;
-
-      // HUD
-      ctx.fillStyle = '#bfe';
-      ctx.font = '14px system-ui';
-      ctx.fillText('Prediction: ' + (recent[recent.length-1] || 'none'), 10, 20);
+      ctx.fillRect(player.x,player.y,player.w,player.h);
     }
 
-    let lastTime = performance.now();
-    function loop(now) {
-      const dt = (now - lastTime) / 1000;
-      lastTime = now;
-      update(dt);
-      draw();
-      requestAnimationFrame(loop);
+    function gameLoop() {
+      updateGame();
+      drawGame();
+      requestAnimationFrame(gameLoop);
     }
 
-    // periodic prediction loop
-    let predictInterval = null;
-    function startPredicting() {
-      if (predictInterval) clearInterval(predictInterval);
-      predictInterval = setInterval(() => { predictFrame().catch(console.error); }, 120); // ~8fps predictions
-    }
-    function stopPredicting() {
-      if (predictInterval) { clearInterval(predictInterval); predictInterval = null; }
-    }
-
-    // --- Controls ---
     startBtn.addEventListener('click', async () => {
       startBtn.disabled = true;
-      startBtn.textContent = 'Loading...';
+      stopBtn.disabled = false;
       try {
         await loadModel();
         await startWebcam();
         running = true;
-        startPredicting();
-        requestAnimationFrame(loop);
-        stopBtn.disabled = false;
-        startBtn.textContent = 'Running';
-      } catch (e) {
-        console.error(e);
-        alert('모델 또는 웹캠을 불러오는 중 오류가 발생했습니다. 콘솔을 확인하세요.');
+        predict();
+        gameLoop();
+      } catch (err) {
         startBtn.disabled = false;
-        startBtn.textContent = 'Start webcam & model';
+        stopBtn.disabled = true;
       }
     });
 
     stopBtn.addEventListener('click', () => {
       running = false;
-      startBtn.disabled = false;
-      startBtn.textContent = 'Start webcam & model';
-      stopBtn.disabled = true;
-      stopPredicting();
       stopWebcam();
+      startBtn.disabled = false;
+      stopBtn.disabled = true;
     });
-
-    calibrateBtn.addEventListener('click', () => {
-      // very simple baseline: clear smoothing buffer
-      recent.length = 0;
-      alert('Calibration done: baseline cleared. 이제 손 제스처를 보여주세요.');
-    });
-
-    // helpful keyboard controls for testing without webcam
-    window.addEventListener('keydown', (e) => {
-      if (e.key === 'ArrowLeft') applyControl('left');
-      if (e.key === 'ArrowRight') applyControl('right');
-      if (e.key === ' ') applyControl('jump');
-    });
-    window.addEventListener('keyup', (e) => { if (e.key === 'ArrowLeft' || e.key === 'ArrowRight') applyControl('none'); });
-
-    // resize canvas to container width while keeping height
-    function resizeCanvas(){
-      const rect = canvas.getBoundingClientRect();
-      // keep logical resolution fixed for predictable physics
-      // nothing to do now; canvas has fixed size 800x400
-    }
-    window.addEventListener('resize', resizeCanvas);
   </script>
 </body>
 </html>
-
