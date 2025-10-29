@@ -1,145 +1,169 @@
-<!doctype html>
-<html lang="ko">
+<!DOCTYPE html>
+<html lang="en">
 <head>
-  <meta charset="utf-8" />
-  <meta name="viewport" content="width=device-width,initial-scale=1" />
-  <title>Teachable Machine Game Controller</title>
-  <style>
-    body {font-family: system-ui, sans-serif; background: #0a0f1a; color: #e6eef8; margin: 0; padding: 20px; display: flex; gap: 20px;}
-    video {width: 100%; max-width: 360px; background: #000; border-radius: 10px;}
-    canvas {background: #111a2b; border-radius: 10px; display: block; margin-top: 10px;}
-    button {margin: 5px; padding: 8px 12px; border: none; border-radius: 6px; background: #1f2a44; color: #fff; cursor: pointer;}
-    button:hover {background: #2b3a5c;}
-    .label {background: #16213a; margin: 4px; padding: 5px 8px; border-radius: 4px; display: inline-block;}
-  </style>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Gesture-Controlled Game</title>
+    <style>
+        body {
+            font-family: Arial, sans-serif;
+            background-color: #f0f0f0;
+            display: flex;
+            flex-direction: column;
+            align-items: center;
+            justify-content: center;
+            height: 100vh;
+            margin: 0;
+        }
+        #game-container {
+            position: relative;
+            width: 800px;
+            height: 400px;
+            background-color: #87CEEB;
+            border: 2px solid #000;
+            overflow: hidden;
+        }
+        #character {
+            position: absolute;
+            bottom: 0;
+            left: 50%;
+            width: 50px;
+            height: 50px;
+            background-color: #FF0000;
+            transform: translateX(-50%);
+            transition: bottom 0.1s ease-out;
+        }
+        #webcam-container {
+            position: absolute;
+            top: 10px;
+            right: 10px;
+            width: 200px;
+            height: 150px;
+            border: 1px solid #000;
+            background-color: #fff;
+        }
+        #label-container {
+            margin-top: 20px;
+            text-align: center;
+        }
+        .label {
+            margin: 5px;
+            font-size: 16px;
+        }
+        #status {
+            margin-top: 10px;
+            font-size: 18px;
+            color: #333;
+        }
+    </style>
 </head>
 <body>
-  <div>
-    <h2>Teachable Machine Model</h2>
-    <p>Model URL: <code>mXVIPoHTE</code></p>
-    <video id="webcam" autoplay playsinline muted></video>
-    <div id="labels"></div>
-    <div>
-      <button id="startBtn">웹캠 시작</button>
-      <button id="stopBtn" disabled>중지</button>
+    <h1>Gesture-Controlled Game</h1>
+    <p>Use your webcam to control the character: left, right, jump, or none.</p>
+    <div id="game-container">
+        <div id="character"></div>
     </div>
-  </div>
-  <div style="flex:1">
-    <h2>게임 화면</h2>
-    <canvas id="game" width="800" height="400"></canvas>
-  </div>
+    <div id="webcam-container"></div>
+    <div id="label-container"></div>
+    <div id="status">Loading model...</div>
 
-  <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@0.8/dist/teachablemachine-image.min.js"></script>
-  <script>
-    const MODEL_URL = 'https://teachablemachine.withgoogle.com/models/mXVIPoHTE/';
-    let model, webcamStream, running = false;
-    const video = document.getElementById('webcam');
-    const labelsDiv = document.getElementById('labels');
-    const startBtn = document.getElementById('startBtn');
-    const stopBtn = document.getElementById('stopBtn');
-    const canvas = document.getElementById('game');
-    const ctx = canvas.getContext('2d');
+    <script src="https://cdn.jsdelivr.net/npm/@tensorflow/tfjs@latest/dist/tf.min.js"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@teachablemachine/image@latest/dist/teachablemachine-image.min.js"></script>
+    <script>
+        const URL = "https://teachablemachine.withgoogle.com/models/mXVIPoHTE/";
+        let model, webcam, labelContainer, maxPredictions;
+        const character = document.getElementById('character');
+        const gameContainer = document.getElementById('game-container');
+        const status = document.getElementById('status');
 
-    const player = {x:100,y:300,w:40,h:60,vx:0,vy:0,speed:3.2,jumpPower:-10,onGround:false};
-    const gravity = 0.6;
+        let charX = gameContainer.offsetWidth / 2 - 25; // Initial x position
+        let charY = 0; // Initial y position (bottom)
+        let velocityY = 0; // For jumping
+        const gravity = 0.5;
+        const jumpPower = 15;
+        const moveSpeed = 5;
+        let isJumping = false;
 
-    async function loadModel() {
-      model = await tmImage.load(MODEL_URL + 'model.json', MODEL_URL + 'metadata.json');
-      console.log('모델 불러오기 완료');
-    }
+        async function init() {
+            const modelURL = URL + "model.json";
+            const metadataURL = URL + "metadata.json";
 
-    async function startWebcam() {
-      try {
-        const stream = await navigator.mediaDevices.getUserMedia({ video: { facingMode: 'user' }, audio: false });
-        video.srcObject = stream;
-        webcamStream = stream;
-        await video.play();
-        console.log('웹캠 시작됨');
-      } catch (err) {
-        alert('웹캠 접근 오류: 브라우저 권한 또는 HTTPS 환경을 확인하세요.\n' + err.message);
-        console.error(err);
-        throw err;
-      }
-    }
+            model = await tmImage.load(modelURL, metadataURL);
+            maxPredictions = model.getTotalClasses();
 
-    function stopWebcam() {
-      if (webcamStream) {
-        webcamStream.getTracks().forEach(t => t.stop());
-        webcamStream = null;
-        console.log('웹캠 중지됨');
-      }
-    }
+            labelContainer = document.getElementById("label-container");
+            for (let i = 0; i < maxPredictions; i++) {
+                labelContainer.appendChild(document.createElement("div"));
+            }
 
-    async function predict() {
-      if (!running || !model) return;
-      const prediction = await model.predict(video);
-      prediction.sort((a,b)=>b.probability - a.probability);
-      const top = prediction[0];
-      labelsDiv.innerHTML = prediction.map(p => `<div class='label'>${p.className}: ${(p.probability*100).toFixed(1)}%</div>`).join('');
+            // Setup webcam
+            webcam = new tmImage.Webcam(200, 150, true); // width, height, flip
+            await webcam.setup(); // request access to the webcam
+            await webcam.play();
+            window.requestAnimationFrame(loop);
 
-      if (top.probability > 0.6) {
-        controlPlayer(top.className);
-      } else {
-        controlPlayer('none');
-      }
-      if (running) requestAnimationFrame(predict);
-    }
+            document.getElementById("webcam-container").appendChild(webcam.canvas);
+            status.innerText = "Model loaded! Show gestures to control the character.";
+        }
 
-    function controlPlayer(action) {
-      if (action === 'left') player.vx = -player.speed;
-      else if (action === 'right') player.vx = player.speed;
-      else if (action === 'jump' && player.onGround) { player.vy = player.jumpPower; player.onGround = false; }
-      else if (action === 'none') player.vx = 0;
-    }
+        async function loop() {
+            webcam.update(); // update the webcam frame
+            await predict();
+            updateCharacter();
+            window.requestAnimationFrame(loop);
+        }
 
-    function updateGame() {
-      player.vy += gravity;
-      player.x += player.vx;
-      player.y += player.vy;
-      if (player.y + player.h >= canvas.height - 40) {
-        player.y = canvas.height - 40 - player.h;
-        player.vy = 0;
-        player.onGround = true;
-      }
-    }
+        async function predict() {
+            const prediction = await model.predict(webcam.canvas);
+            let highestProb = 0;
+            let action = 'none';
 
-    function drawGame() {
-      ctx.clearRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle = '#09142c';
-      ctx.fillRect(0,0,canvas.width,canvas.height);
-      ctx.fillStyle = '#203764';
-      ctx.fillRect(0,canvas.height-40,canvas.width,40);
-      ctx.fillStyle = '#f5a623';
-      ctx.fillRect(player.x,player.y,player.w,player.h);
-    }
+            for (let i = 0; i < maxPredictions; i++) {
+                const classPrediction = prediction[i].className + ": " + prediction[i].probability.toFixed(2);
+                labelContainer.childNodes[i].innerHTML = classPrediction;
 
-    function gameLoop() {
-      updateGame();
-      drawGame();
-      requestAnimationFrame(gameLoop);
-    }
+                if (prediction[i].probability > highestProb) {
+                    highestProb = prediction[i].probability;
+                    action = prediction[i].className;
+                }
+            }
 
-    startBtn.addEventListener('click', async () => {
-      startBtn.disabled = true;
-      stopBtn.disabled = false;
-      try {
-        await loadModel();
-        await startWebcam();
-        running = true;
-        predict();
-        gameLoop();
-      } catch (err) {
-        startBtn.disabled = false;
-        stopBtn.disabled = true;
-      }
-    });
+            // Control character based on action
+            handleAction(action);
+        }
 
-    stopBtn.addEventListener('click', () => {
-      running = false;
-      stopWebcam();
-      startBtn.disabled = false;
-      stopBtn.disabled = true;
-    });
-  </script>
+        function handleAction(action) {
+            if (action === 'left') {
+                charX -= moveSpeed;
+                if (charX < 0) charX = 0;
+            } else if (action === 'right') {
+                charX += moveSpeed;
+                if (charX > gameContainer.offsetWidth - 50) charX = gameContainer.offsetWidth - 50;
+            } else if (action === 'jump' && !isJumping) {
+                velocityY = -jumpPower;
+                isJumping = true;
+            }
+            // 'none' does nothing
+        }
+
+        function updateCharacter() {
+            // Apply gravity
+            velocityY += gravity;
+            charY += velocityY;
+
+            // Ground collision
+            if (charY > 0) {
+                charY = 0;
+                velocityY = 0;
+                isJumping = false;
+            }
+
+            // Update position
+            character.style.left = charX + 'px';
+            character.style.bottom = -charY + 'px'; // Invert y for bottom positioning
+        }
+
+        init();
+    </script>
 </body>
 </html>
